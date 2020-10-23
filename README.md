@@ -1,6 +1,8 @@
 # soft_mask_bert 文本纠错与BERT的最新结合
 soft_mask_bert model for Chinese Spelling Correction in keras
 
+本代码是对论文[Spelling Error Correction with Soft-Masked BERT](https://arxiv.org/pdf/2005.07421.pdf)结果的复现。
+
 # 测试环境
 python 3.6 + tensorflow 2.3.1 + Keras-2.4.3
 
