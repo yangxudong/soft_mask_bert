@@ -10,8 +10,8 @@ python 3.6 + tensorflow 2.3.1 + Keras-2.4.3
 
 - [https://github.com/CyberZHG/keras-bert](https://github.com/CyberZHG/keras-bert)
 
-# 测试数据集
-测试数据集从下面的github获取，sgml格式
+# 训练&测试数据集
+训练&测试数据集从下面的github获取，sgml格式
 - [https://github.com/wdimmy/Automatic-Corpus-Generation](https://github.com/wdimmy/Automatic-Corpus-Generation)
 
 # Bert中文版权重
