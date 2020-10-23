@@ -17,6 +17,8 @@ mask_id = token_dict.get("[MASK]")
 
 tokenizer = Tokenizer(token_dict)
 id2token = {j: i for i, j in token_dict.items()}
+char_start_index = 670
+char_end_index = 7991
 
 
 def get_model_from_embedding(
@@ -119,7 +121,24 @@ def get_inputs(seq_len):
     ) for name in names]
 
 
-def build_csc_model(max_seq_len, alpha=0.8):
+def custom_loss(args, alpha=0.8):
+    """
+    :param args: arguments to compute loss
+    :param alpha: can not be a part of args, because constant can not be serialize to model config."""
+    mask_float, char_labels, mistake_labels, error_prob, predict = args
+    correct_loss = K.sparse_categorical_crossentropy(char_labels, predict)
+    correct_loss = K.sum(correct_loss * mask_float, axis=1) / K.sum(mask_float, axis=1)
+    correct_loss = K.sum(correct_loss)
+
+    detect_loss = K.binary_crossentropy(mistake_labels, error_prob)
+    detect_loss = K.sum(detect_loss * mask_float, axis=1) / K.sum(mask_float, axis=1)
+    detect_loss = K.sum(detect_loss)
+
+    loss = alpha * correct_loss + (1.0 - alpha) * detect_loss
+    return loss
+
+
+def build_csc_model(max_seq_len):
     # build detect model
     with open(paths.config, 'r') as reader:
         config = json.load(reader)
@@ -129,6 +148,7 @@ def build_csc_model(max_seq_len, alpha=0.8):
     inputs = get_inputs(seq_len)  # [input_ids, segment_ids, input_mask]
     token_num = len(token_dict)
     embed_dim = config["hidden_size"]
+    # config["num_hidden_layers"] = 1
 
     token_embedding_lookup = TokenEmbedding(
         input_dim=token_num,
@@ -163,8 +183,6 @@ def build_csc_model(max_seq_len, alpha=0.8):
     # detect_model.summary()
 
     # build correct model
-    char_start_index = 671
-    char_end_index = 7992
     num_classes = char_end_index - char_start_index + 2  # add extra id representing the oov original char
 
     mask_ids = K.constant(mask_id, shape=(1, max_seq_len))
@@ -181,44 +199,25 @@ def build_csc_model(max_seq_len, alpha=0.8):
     load_model_weights_from_checkpoint(bert, config, paths.checkpoint)
 
     output = keras.layers.Dense(num_classes, activation='softmax', name="correct_prob")(bert_output + embeddings)
-    # logits = keras.layers.Dense(num_classes)(bert_output)
-    # output = keras.layers.Activation('softmax', name="correct_prob")(logits)
     error_prob = err_prob[:, :, 0]  # squeeze
-    correct_model = keras.models.Model(inputs, [output, error_prob])
-    correct_model.summary()
+    correct_model = keras.Model(inputs, [output, error_prob])
+    # correct_model.summary()
 
-    # mistake_labels = keras.layers.Input(shape=(seq_len,), dtype='int32', name="mistake_labels")
-    # char_labels = keras.layers.Input(shape=(seq_len,), dtype='int32', name="char_labels")
-    #
-    # mask_float = K.cast(inputs[2], K.floatx())
-    # correct_loss = K.sparse_categorical_crossentropy(char_labels, logits, from_logits=True)
-    # correct_loss = K.sum(correct_loss * mask_float, axis=1) / K.sum(mask_float, axis=1)
-    # correct_loss = K.sum(correct_loss)
-    #
-    # detect_loss = K.binary_crossentropy(K.cast(mistake_labels, K.floatx()), error_prob)
-    # detect_loss = K.sum(detect_loss * mask_float, axis=1) / K.sum(mask_float, axis=1)
-    # detect_loss = K.sum(detect_loss)
-    #
-    # loss = alpha * correct_loss + (1. - alpha) * detect_loss
-
+    mistake_labels = keras.layers.Input(shape=(seq_len,), dtype='float32', name="mistake_labels")
+    char_labels = keras.layers.Input(shape=(seq_len,), dtype='int32', name="char_labels")
     # 训练模型
-    # train_model = keras.models.Model(
-    #     inputs=inputs + [mistake_labels, char_labels],
-    #     outputs=[output, error_prob]
-    # )
-    # train_model.add_loss(loss)
-    # train_model.summary()
+    train_model = keras.Model(
+        inputs=inputs + [mistake_labels, char_labels],
+        outputs=[output, error_prob]
+    )
 
-    # def empty_loss_fn(y_true, y_pred):
-    #     return 0.
-    #
-    # def pred_loss_fn(y_true, y_pred):
-    #     return y_pred
-
-    correct_model.compile(optimizer=keras.optimizers.Adam(learning_rate),
-                          loss=['sparse_categorical_crossentropy', 'binary_crossentropy'],
-                          loss_weights=[0.8, 0.2])
-    return correct_model, correct_model
+    mask_float = K.cast(inputs[2], K.floatx())
+    args_for_loss = (mask_float, char_labels, mistake_labels, error_prob, output)
+    loss = keras.layers.Lambda(custom_loss)(args_for_loss)
+    train_model.add_loss(loss)
+    train_model.summary()
+    train_model.compile(optimizer=keras.optimizers.Adam(learning_rate))
+    return train_model, correct_model
 
 
 SEQ_LEN = 256
@@ -228,27 +227,26 @@ min_learning_rate = 1e-4
 model, predict_model = build_csc_model(SEQ_LEN)
 
 
-def extract_items(sample, start=671, end=7992):  # process one by one
+def extract_items(sample, start=char_start_index, end=char_end_index):  # process one by one
     inputs, labels = convert_to_sample(sample, tokenizer, SEQ_LEN, start, end)
     output, err_prob = predict_model.predict(inputs)
     raw_ids, _, mask = inputs
-    num_chars = len(mask) - 1
+    num_chars = sum(mask) - 1
     oov = end - start + 1
     ids = np.argmax(output[0, :, :], axis=-1)  # shape (seq_len, num_classes)
     mistakes = []
-    correct_ids = []
+    chars = list(sample["text"])
     for i in range(1, num_chars):
         if ids[i] == oov:
-            correct_ids.append(raw_ids[i])
             if start <= raw_ids[i] <= end:
                 mistakes.append({"loc": i, "wrong": id2token.get(raw_ids[i]), "correct": "[OOV]"})
         else:
             correct_id = start + ids[i]
-            correct_ids.append(correct_id)
             if correct_id != raw_ids[i]:
                 mistakes.append({"loc": i, "wrong": id2token.get(raw_ids[i]), "correct": id2token.get(correct_id)})
-    sentence = ''.join([id2token.get(idx) for idx in correct_ids])
-    return {"text": sentence, "mistakes": mistakes}
+                chars[i - 1] = id2token.get(correct_id)
+    sentence = ''.join(chars)
+    return {"text": sample["text"], "correct": sentence, "mistakes": mistakes}
 
 
 class Evaluate(keras.callbacks.Callback):

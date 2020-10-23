@@ -6,35 +6,22 @@ except ImportError:
     import xml.etree.ElementTree as ET
 
 
-def convert_to_sample(data, tokenizer, max_len, start=671, end=7992):
-    text = data["text"][:max_len-2]  # 截断
-    if not text:
-        return None, None
-    tokens = tokenizer.tokenize(text)
-    indices, segments = tokenizer.encode(first=text, max_len=max_len)
-    if len(tokens) >= max_len - 2:  # account for [cls] [sep]
-        mask = [1] * max_len
-    else:
-        mask = [1] * len(tokens) + [0] * (max_len - len(tokens))
-
-    mistake_labels = [0] * max_len
+def convert_to_sample(data, tokenizer, max_len, start=670, end=7991):
+    text = data["text"]
+    chars = list(text)
     for mistake in data["mistakes"]:
-        loc = int(mistake["loc"])
-        if loc >= len(tokens) - 1 or loc >= max_len - 1:  # account for tail [SEP]
-            continue
-        mistake_labels[loc] = 1
-        tokens[loc] = mistake["correct"]
-    correct = ''.join(tokens[1:-1])
-    ids, _ = tokenizer.encode(first=correct, max_len=max_len)
-    oov = end - start + 1
+        index = int(mistake["loc"]) - 1
+        chars[index] = mistake["correct"]
+    correct = ''.join(chars)
+    indices, segments = tokenizer.encode(first=text, max_len=max_len)
+    mask = [1 if idx > 0 else 0 for idx in indices]
 
-    top = min(len(tokens), max_len) - 1
-    for i in range(1, top):
-        if 671 <= ids[i] <= 7992:
-            ids[i] -= 671
-        else:
-            ids[i] = oov
-    return [indices, segments, mask], [mistake_labels, ids]
+    new_indices, _ = tokenizer.encode(first=correct, max_len=max_len)
+    mistake_labels = [0 if indices[i] == new_indices[i] else 1 for i in range(len(indices))]
+
+    oov = end - start + 1
+    char_labels = [idx - start if start <= idx <= end else oov for idx in new_indices]
+    return [indices, segments, mask], [mistake_labels, char_labels]
 
 
 def load_data(input_file):
@@ -107,21 +94,22 @@ class DataGenerator(keras.utils.Sequence):
         batch_input_ids = np.empty((self.batch_size, self.dim), dtype=np.int32)
         batch_segment_ids = np.empty((self.batch_size, self.dim), dtype=np.int32)
         batch_input_masks = np.empty((self.batch_size, self.dim), dtype=np.int32)
-        batch_mistake_labels = np.empty((self.batch_size, self.dim), dtype=np.int32)
+        batch_mistake_labels = np.empty((self.batch_size, self.dim), dtype=np.float32)
         batch_char_labels = np.empty((self.batch_size, self.dim), dtype=np.int32)
-        sample_weights = []
+        # sample_weights = []
         for i, index in enumerate(indexes):
             inputs, labels = self.data[index]
-            weight = 1.0 / sum(inputs[2])
-            sample_weights.append(weight)
+            # weight = 1.0 / sum(inputs[2])
+            # sample_weights.append(weight)
             batch_input_ids[i, ] = np.array(inputs[0], dtype=np.int32)
             batch_segment_ids[i, ] = np.array(inputs[1], dtype=np.int32)
             batch_input_masks[i, ] = np.array(inputs[2], dtype=np.int32)
-            batch_mistake_labels[i, ] = np.array(labels[0], dtype=np.int32)
+            batch_mistake_labels[i, ] = np.array(labels[0], dtype=np.float32)
             batch_char_labels[i, ] = np.array(labels[1], dtype=np.int32)
-        x = {'Input-Token': batch_input_ids, 'Input-Segment': batch_segment_ids, 'Input-Masked': batch_input_masks}
-        # 'mistake_labels': batch_mistake_labels, 'char_labels': batch_char_labels}
-        return x, [batch_char_labels, batch_mistake_labels], np.array(sample_weights, dtype=np.float32)
+        x = {'Input-Token': batch_input_ids, 'Input-Segment': batch_segment_ids, 'Input-Masked': batch_input_masks,
+             'mistake_labels': batch_mistake_labels, 'char_labels': batch_char_labels}
+        # return x, [batch_char_labels, batch_mistake_labels], np.array(sample_weights, dtype=np.float32)
+        return (x, )
 
 
 class DataGenerator_old(object):
