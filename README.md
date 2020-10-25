@@ -9,6 +9,10 @@ python 3.6 + tensorflow 2.3.1 + Keras-2.4.3
 # 依赖 keras_bert
 
 - [https://github.com/CyberZHG/keras-bert](https://github.com/CyberZHG/keras-bert)
+- **注意事项**：修改keras_bert layers目录的`__init__.py`, 导出`PositionEmbedding`类
+  - 假设python3的安装位置为：`/usr/local/lib/python3.6/`，执行如下命令
+  - `sudo vim /usr/local/lib/python3.6/site-packages/keras_bert/layers/__init__.py`
+  - 把第二行修改为`from .embedding import get_embedding, TokenEmbedding, EmbeddingSimilarity, PositionEmbedding` 
 
 # 训练&测试数据集
 训练&测试数据集从下面的github获取，sgml格式

@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 # import os
 # os.environ['TF_KERAS'] = '1'
 # import tensorflow as tf
@@ -8,9 +9,11 @@ from keras_bert.layers import TokenEmbedding, PositionEmbedding
 import json
 from data_generator import load_data, convert_to_sample, DataGenerator
 import numpy as np
-import tqdm
+from tqdm import tqdm
 
-pretrained_path = "/Users/weisu.yxd/Code/bert/chinese_L-12_H-768_A-12"
+
+# pretrained_path = "/Users/weisu.yxd/Code/bert/chinese_L-12_H-768_A-12"
+pretrained_path = "chinese_L-12_H-768_A-12"
 paths = get_checkpoint_paths(pretrained_path)
 token_dict = load_vocabulary(paths.vocab)
 mask_id = token_dict.get("[MASK]")
@@ -229,11 +232,12 @@ model, predict_model = build_csc_model(SEQ_LEN)
 
 def extract_items(sample, start=char_start_index, end=char_end_index):  # process one by one
     inputs, labels = convert_to_sample(sample, tokenizer, SEQ_LEN, start, end)
-    output, err_prob = predict_model.predict(inputs)
-    raw_ids, _, mask = inputs
-    num_chars = sum(mask) - 1
+    raw_ids, segment_ids, mask = inputs
+    inputs = [np.array([raw_ids], dtype=np.int32), np.array([segment_ids], dtype=np.int32), np.array([mask], dtype=np.int32)]
+    output, err_prob = predict_model.predict(inputs, batch_size=1)
+    num_chars = sum(mask) - 1  # account for [CLS] and [SEP]
     oov = end - start + 1
-    ids = np.argmax(output[0, :, :], axis=-1)  # shape (seq_len, num_classes)
+    ids = np.argmax(output[0, :, :], axis=-1)  # shape (seq_len,)
     mistakes = []
     chars = list(sample["text"])
     for i in range(1, num_chars):
@@ -248,6 +252,11 @@ def extract_items(sample, start=char_start_index, end=char_end_index):  # proces
     sentence = ''.join(chars)
     return {"text": sample["text"], "correct": sentence, "mistakes": mistakes}
 
+
+train_data_file = "data/train.sgml"
+dev_data_file = "data/train15.sgml"
+train_data = load_data(train_data_file)
+dev_data = load_data(dev_data_file)
 
 class Evaluate(keras.callbacks.Callback):
     def __init__(self):
@@ -271,12 +280,12 @@ class Evaluate(keras.callbacks.Callback):
             self.passed += 1
 
     def on_epoch_end(self, epoch, logs=None):
-        f1, precision, recall = self.evaluate()
+        f1, precision, recall, accuracy = self.evaluate()
         self.F1.append(f1)
         if f1 > self.best:
             self.best = f1
             model.save_weights('best_model.weights')
-        print('f1: %.4f, precision: %.4f, recall: %.4f, best f1: %.4f\n' % (f1, precision, recall, self.best))
+        print('f1: %.4f, precision: %.4f, recall: %.4f, accuracy: %4f, best f1: %.4f\n' % (f1, precision, recall, accuracy, self.best))
 
     def evaluate(self):
         TP, FP, TN, FN = 0, 0, 0, 0
@@ -284,7 +293,7 @@ class Evaluate(keras.callbacks.Callback):
         for d in tqdm(iter(dev_data)):
             pred = extract_items(d)
             positive = "mistakes" in d and d["mistakes"]
-            if d["text"] == pred["text"]:
+            if d["text"] == pred["correct"]:
                 if positive:
                     TP += 1
                 else:
@@ -297,7 +306,7 @@ class Evaluate(keras.callbacks.Callback):
 
             s = json.dumps({
                 'text': d['text'],
-                'new_text': pred['text'],
+                'new_text': pred['correct'],
                 'mistakes': d['mistakes'] if 'mistakes' in d else [],
                 'predict': pred['mistakes'] if 'mistakes' in pred else []
             }, ensure_ascii=False, indent=4)
@@ -305,20 +314,16 @@ class Evaluate(keras.callbacks.Callback):
         F.close()
         precision = TP / (TP + FP + 1e-10)
         recall = TP / (TP + FN + 1e-10)
+        accuracy = (TP + TN) / (TP + FP + TN + FN)
         f1 = 2 * precision * recall / (precision + recall)
-        return f1, precision, recall
+        return f1, precision, recall, accuracy
 
 
-BATCH_SIZE = 128
-train_data_file = "/Users/weisu.yxd/Code/info_extract/CSC/Automatic-Corpus-Generation/model/data/sighan/train.sgml"
-dev_data_file = "/Users/weisu.yxd/Code/info_extract/CSC/Automatic-Corpus-Generation/model/data/sighan/train15.sgml"
-
-train_data = load_data(train_data_file)
-dev_data = load_data(dev_data_file)
+BATCH_SIZE = 32
 train_generator = DataGenerator(train_data, tokenizer, SEQ_LEN, BATCH_SIZE)
 evaluator = Evaluate()
 
 if __name__ == '__main__':
-    model.fit(train_generator, epochs=5, callbacks=[evaluator])
+    model.fit(train_generator, epochs=20, callbacks=[evaluator])
 else:
     model.load_weights('best_model.weights')
