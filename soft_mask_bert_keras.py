@@ -320,6 +320,7 @@ class Evaluate(keras.callbacks.Callback):
 
 
 BATCH_SIZE = 32
+assert BATCH_SIZE <= len(train_data)
 train_generator = DataGenerator(train_data, tokenizer, SEQ_LEN, BATCH_SIZE)
 evaluator = Evaluate()
 
