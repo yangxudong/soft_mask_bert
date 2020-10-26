@@ -214,7 +214,10 @@ def build_csc_model(max_seq_len):
         outputs=[output, error_prob]
     )
 
-    mask_float = K.cast(inputs[2], K.floatx())
+    # 去掉头部的[CLS]和尾部的[SEP]
+    mask_sum = K.sum(inputs[2], axis=-1)
+    diff = K.one_hot(mask_sum - 1, seq_len) + K.one_hot(0, seq_len)
+    mask_float = K.cast_to_floatx(inputs[2]) - diff
     args_for_loss = (mask_float, char_labels, mistake_labels, error_prob, output)
     loss = keras.layers.Lambda(custom_loss)(args_for_loss)
     train_model.add_loss(loss)
@@ -223,7 +226,7 @@ def build_csc_model(max_seq_len):
     return train_model, correct_model
 
 
-SEQ_LEN = 256
+SEQ_LEN = 128
 learning_rate = 5e-4
 min_learning_rate = 1e-4
 
@@ -244,6 +247,7 @@ def extract_items(sample, start=char_start_index, end=char_end_index):  # proces
         if ids[i] == oov:
             if start <= raw_ids[i] <= end:
                 mistakes.append({"loc": i, "wrong": id2token.get(raw_ids[i]), "correct": "[OOV]"})
+                chars[i - 1] = "[OOV]"  # predict to oov incorrectly
         else:
             correct_id = start + ids[i]
             if correct_id != raw_ids[i]:
@@ -257,6 +261,7 @@ train_data_file = "data/train.sgml"
 dev_data_file = "data/train15.sgml"
 train_data = load_data(train_data_file)
 dev_data = load_data(dev_data_file)
+
 
 class Evaluate(keras.callbacks.Callback):
     def __init__(self):
@@ -290,10 +295,10 @@ class Evaluate(keras.callbacks.Callback):
     def evaluate(self):
         TP, FP, TN, FN = 0, 0, 0, 0
         F = open('dev_pred.json', 'w')
-        for d in tqdm(iter(dev_data)):
-            pred = extract_items(d)
-            positive = "mistakes" in d and d["mistakes"]
-            if d["text"] == pred["correct"]:
+        for sample in tqdm(iter(dev_data)):
+            pred = extract_items(sample)
+            positive = "mistakes" in sample and sample["mistakes"]
+            if sample["text"] == pred["correct"]:
                 if positive:
                     TP += 1
                 else:
@@ -305,9 +310,9 @@ class Evaluate(keras.callbacks.Callback):
                     FP += 1
 
             s = json.dumps({
-                'text': d['text'],
+                'text': sample['text'],
                 'new_text': pred['correct'],
-                'mistakes': d['mistakes'] if 'mistakes' in d else [],
+                'mistakes': sample['mistakes'] if 'mistakes' in sample else [],
                 'predict': pred['mistakes'] if 'mistakes' in pred else []
             }, ensure_ascii=False, indent=4)
             F.write(s + '\n')
