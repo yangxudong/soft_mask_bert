@@ -23,6 +23,11 @@ python 3.6 + tensorflow 2.3.1 + Keras-2.4.3
 - 官方版： [https://github.com/google-research/bert](https://github.com/google-research/bert)
 - 哈工大版： [https://github.com/ymcui/Chinese-BERT-wwm](https://github.com/ymcui/Chinese-BERT-wwm)
 
+# 推荐阅读
+
+- 我的知乎专栏：[https://www.zhihu.com/column/c_1247512235343265792](https://www.zhihu.com/column/c_1247512235343265792)
+- 及同名微信公众号：算法工程师的进阶之路
+
 # 中文拼写纠错 (Spelling Correction)
 
 ## 背景

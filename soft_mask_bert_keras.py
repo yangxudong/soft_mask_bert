@@ -12,8 +12,8 @@ import numpy as np
 from tqdm import tqdm
 
 
-# pretrained_path = "/Users/weisu.yxd/Code/bert/chinese_L-12_H-768_A-12"
-pretrained_path = "chinese_L-12_H-768_A-12"
+pretrained_path = "/Users/weisu.yxd/Code/bert/chinese_L-12_H-768_A-12"
+# pretrained_path = "chinese_L-12_H-768_A-12"
 paths = get_checkpoint_paths(pretrained_path)
 token_dict = load_vocabulary(paths.vocab)
 mask_id = token_dict.get("[MASK]")
@@ -330,6 +330,9 @@ train_generator = DataGenerator(train_data, tokenizer, SEQ_LEN, BATCH_SIZE)
 evaluator = Evaluate()
 
 if __name__ == '__main__':
-    model.fit(train_generator, epochs=20, callbacks=[evaluator])
+    initial_epoch = 0
+    if initial_epoch > 0:
+        model.load_weights('best_model.weights')
+    model.fit(train_generator, epochs=20, initial_epoch=initial_epoch, callbacks=[evaluator])
 else:
     model.load_weights('best_model.weights')
