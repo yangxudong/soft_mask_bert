@@ -260,9 +260,8 @@ def extract_items(sample, start=char_start_index, end=char_end_index):  # proces
     for mistake in sample["mistakes"][:]:
         loc = int(mistake["loc"]) - 1
         if loc >= seq_len - 1:
-            continue
-        else:
             sample["mistakes"].remove(mistake)
+            continue
         chars[loc] = mistake["correct"]
     correct_sentence = ''.join(chars)
     return {"predict": predict_sentence, "correct": correct_sentence, "mistakes": mistakes}
