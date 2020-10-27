@@ -253,8 +253,19 @@ def extract_items(sample, start=char_start_index, end=char_end_index):  # proces
             if correct_id != raw_ids[i]:
                 mistakes.append({"loc": i, "wrong": id2token.get(raw_ids[i]), "correct": id2token.get(correct_id)})
                 chars[i - 1] = id2token.get(correct_id)
-    sentence = ''.join(chars)
-    return {"text": sample["text"], "correct": sentence, "mistakes": mistakes}
+    predict_sentence = ''.join(chars)
+
+    seq_len = len(raw_ids)
+    chars = list(sample["text"])
+    for mistake in sample["mistakes"][:]:
+        loc = int(mistake["loc"]) - 1
+        if loc >= seq_len - 1:
+            continue
+        else:
+            sample["mistakes"].remove(mistake)
+        chars[loc] = mistake["correct"]
+    correct_sentence = ''.join(chars)
+    return {"predict": predict_sentence, "correct": correct_sentence, "mistakes": mistakes}
 
 
 train_data_file = "data/train.sgml"
@@ -298,7 +309,7 @@ class Evaluate(keras.callbacks.Callback):
         for sample in tqdm(iter(dev_data)):
             pred = extract_items(sample)
             positive = "mistakes" in sample and sample["mistakes"]
-            if sample["text"] == pred["correct"]:
+            if pred["predict"] == pred["correct"]:
                 if positive:
                     TP += 1
                 else:
@@ -311,7 +322,7 @@ class Evaluate(keras.callbacks.Callback):
 
             s = json.dumps({
                 'text': sample['text'],
-                'new_text': pred['correct'],
+                'new_text': pred['predict'],
                 'mistakes': sample['mistakes'] if 'mistakes' in sample else [],
                 'predict': pred['mistakes'] if 'mistakes' in pred else []
             }, ensure_ascii=False, indent=4)
@@ -334,5 +345,6 @@ if __name__ == '__main__':
     if initial_epoch > 0:
         model.load_weights('best_model.weights')
     model.fit(train_generator, epochs=20, initial_epoch=initial_epoch, callbacks=[evaluator])
+    model.save_weights("last_model.weights")
 else:
     model.load_weights('best_model.weights')
